@@ -1,12 +1,13 @@
 const express = require("express");
 const axios = require("axios");
+const cheerio = require("cheerio");
 const cors = require("cors");
 
 const app = express();
 app.use(cors());
 
 async function getUserId(username) {
-    console.log(`🔍 Getting user ID for ${username}`);
+    console.log(`🔍 Looking up user ID for: ${username}`);
     const res = await axios.post(
         "https://users.roblox.com/v1/usernames/users",
         { usernames: [username], excludeBannedUsers: true },
@@ -22,30 +23,25 @@ async function getUserId(username) {
     return id;
 }
 
-async function getUserGames(userId) {
-    console.log(`🎮 Getting games for userId: ${userId}`);
-    const res = await axios.get(`https://games.roblox.com/v2/users/${userId}/games?accessFilter=2&sortOrder=Asc&limit=10`);
-    const gameIds = res.data.data.map(game => game.id);
-    console.log(`✅ Found games: ${gameIds.join(", ")}`);
-    return gameIds;
-}
-
-async function getGamepasses(username) {
-    const userId = await getUserId(username);
-    const gameIds = await getUserGames(userId);
+async function scrapeGamepassesFromStore(userId) {
+    console.log(`🧽 Scraping store page for userId: ${userId}`);
+    const storeUrl = `https://www.roblox.com/users/${userId}/creations?view=store`;
+    const res = await axios.get(storeUrl);
+    const $ = require("cheerio").load(res.data);
     const gamepasses = [];
 
-    for (const gameId of gameIds) {
-        console.log(`🛍️ Fetching gamepasses for gameId: ${gameId}`);
-        const res = await axios.get(`https://games.roblox.com/v1/games/${gameId}/game-passes`);
-        const passes = res.data.data.map(pass => ({
-            id: pass.id,
-            name: pass.name,
-            price: pass.price || 0
-        }));
-        console.log(`✅ Found ${passes.length} passes`);
-        gamepasses.push(...passes);
-    }
+    $(".store-card").each((_, el) => {
+        const name = $(el).find(".text-name").text().trim();
+        const href = $(el).find("a").attr("href");
+        const idMatch = href ? href.match(/catalog\/(\d+)/) : null;
+        const id = idMatch ? idMatch[1] : null;
+        const priceText = $(el).find(".text-robux").text().trim();
+        const price = parseInt(priceText.replace(/[^\d]/g, "")) || 0;
+
+        if (id && name) {
+            gamepasses.push({ id, name, price });
+        }
+    });
 
     return gamepasses;
 }
@@ -58,10 +54,11 @@ app.get("/gamepasses", async (req, res) => {
     }
 
     try {
-        const passes = await getGamepasses(username);
+        const userId = await getUserId(username);
+        const passes = await scrapeGamepassesFromStore(userId);
         res.json(passes);
     } catch (err) {
-        console.error("❌ Error fetching gamepasses:", err.message);
+        console.error("❌ Failed to fetch gamepasses:", err.message);
         res.status(500).send("Failed to fetch gamepasses: " + err.message);
     }
 });
