@@ -7,12 +7,19 @@ const app = express();
 app.use(cors());
 
 async function getUserId(username) {
-    const res = await axios.get(`https://api.roblox.com/users/get-by-username?username=${username}`);
-    if (!res.data || !res.data.Id) {
+    const res = await axios.post(
+        "https://users.roblox.com/v1/usernames/users",
+        { usernames: [username] },
+        { headers: { "Content-Type": "application/json" } }
+    );
+
+    if (!res.data || !res.data.data || res.data.data.length === 0) {
         throw new Error("User not found");
     }
-    return res.data.Id;
+
+    return res.data.data[0].id;
 }
+
 
 async function scrapeGamepassesFromStore(userId) {
     const storeUrl = `https://www.roblox.com/users/${userId}/creations?view=store`;
